@@ -1,0 +1,7 @@
+version: "3"
+
+services:
+  encoder:
+    volumes:
+      - ./.docker/zsh/powerlevel10k/.p10k.zsh:/go/p10k.zsh:delegated
+      - ./.docker/zsh/history:/go/zsh:delegated
