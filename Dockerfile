@@ -41,6 +41,7 @@ RUN git clone https://github.com/powerline/fonts.git --depth=1
 RUN ./fonts/install.sh
 RUN rm -rf fonts
 
+RUN mkdir -p /go/fragmented_videos
 WORKDIR /go/src
 
 RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/v1.1.2/zsh-in-docker.sh)" -- \
