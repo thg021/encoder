@@ -3,7 +3,10 @@ package services
 import (
 	"context"
 	"io"
+	"log"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"cloud.google.com/go/storage"
@@ -12,7 +15,7 @@ import (
 type VideoUpload struct {
 	Paths        []string
 	VideoPath    string
-	OutputBacket string
+	OutputBucket string
 	Errors       []string
 }
 
@@ -31,7 +34,7 @@ func (vu *VideoUpload) UploadObject(objectPath string, client *storage.Client, c
 
 	defer f.Close()
 
-	wc := client.Bucket(vu.OutputBacket).Object(path[1]).NewWriter(ctx)
+	wc := client.Bucket(vu.OutputBucket).Object(path[1]).NewWriter(ctx)
 	wc.ACL = []storage.ACLRule{{Entity: storage.AllUsers, Role: storage.RoleReader}}
 
 	if _, err = io.Copy(wc, f); err != nil {
@@ -42,4 +45,86 @@ func (vu *VideoUpload) UploadObject(objectPath string, client *storage.Client, c
 		return err
 	}
 	return nil
+}
+
+func (vu *VideoUpload) loadPaths() error {
+
+	err := filepath.Walk(vu.VideoPath, func(path string, info os.FileInfo, err error) error {
+
+		if !info.IsDir() {
+			vu.Paths = append(vu.Paths, path)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (vu *VideoUpload) ProcessUpload(concurrency int, doneUpload chan string) error {
+
+	in := make(chan int, runtime.NumCPU())
+	returnChanel := make(chan string)
+
+	err := vu.loadPaths()
+	if err != nil {
+		return err
+	}
+
+	uploadClient, ctx, err := getClientUpload()
+	if err != nil {
+		return err
+	}
+
+	//vamos iniciar o processos de upload. O uploadWorker vai fazer o upload
+	for process := 0; process < concurrency; process++ {
+		go vu.uploadWorker(in, returnChanel, uploadClient, ctx)
+	}
+
+	//func anonima
+	go func() {
+		for x := 0; x < len(vu.Paths); x++ {
+			in <- x
+		}
+		close(in)
+	}()
+
+	for r := range returnChanel {
+		if r != "" {
+			doneUpload <- r
+			break
+		}
+	}
+
+	return nil
+}
+
+func (vu *VideoUpload) uploadWorker(in chan int, returnChanel chan string, uploadClient *storage.Client, ctx context.Context) {
+	for x := range in {
+		err := vu.UploadObject(vu.Paths[x], uploadClient, ctx)
+
+		if err != nil {
+			vu.Errors = append(vu.Errors, vu.Paths[x])
+			log.Printf("Error durring the upload: %v. Error %v", vu.Paths[x], err)
+			returnChanel <- err.Error()
+		}
+		returnChanel <- ""
+	}
+
+	returnChanel <- "upload complete"
+}
+
+func getClientUpload() (*storage.Client, context.Context, error) {
+	ctx := context.Background()
+
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return client, ctx, nil
 }
